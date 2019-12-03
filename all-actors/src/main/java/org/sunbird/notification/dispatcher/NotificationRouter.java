@@ -1,4 +1,3 @@
-/** */
 package org.sunbird.notification.dispatcher;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -12,6 +11,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
@@ -39,11 +40,7 @@ import org.sunbird.pojo.OTP;
 import org.sunbird.response.Response;
 import org.sunbird.util.Constant;
 
-/**
- * mojut6de4rnj,
- *
- * @author manzarul
- */
+/** @author manzarul */
 public class NotificationRouter {
   private static Logger logger = LogManager.getLogger(NotificationRouter.class);
   private static final String TEMPLATE_SUFFIX = ".vm";
@@ -75,20 +72,22 @@ public class NotificationRouter {
     return smsProvider;
   }
 
-  public Response route(
+  public CompletableFuture<Response> route(
       List<NotificationRequest> notificationRequestList, boolean isDryRun, boolean isSync)
       throws BaseException {
     logger.info("making call to route method");
     Response response = new Response();
+    CompletableFuture<Response> completableFuture = new CompletableFuture<Response>();
     if (CollectionUtils.isNotEmpty(notificationRequestList)) {
       Map<String, Object> responseMap = new HashMap<String, Object>();
       for (NotificationRequest notification : notificationRequestList) {
         if (notification.getMode().equalsIgnoreCase(DeliveryMode.phone.name())
             && (notification.getDeliveryType().equalsIgnoreCase(DeliveryType.message.name())
                 || notification.getDeliveryType().equalsIgnoreCase(DeliveryType.otp.name()))) {
-          response = handleMessageAndOTP(notification, isDryRun, responseMap, isSync);
+          completableFuture = handleMessageAndOTP(notification, isDryRun, responseMap, isSync);
         } else if (notification.getMode().equalsIgnoreCase(DeliveryMode.device.name())) {
           response = writeDataToKafa(notification, response, isDryRun, responseMap, isSync);
+          completableFuture.complete(response);
         } else if (notification.getMode().equalsIgnoreCase(DeliveryMode.email.name())
             && notification.getDeliveryType().equalsIgnoreCase(DeliveryType.message.name())) {
           String message = null;
@@ -104,9 +103,32 @@ public class NotificationRouter {
             notification.getTemplate().setData(data);
           }
           if (isSync) {
-            response = syDispatcher.syncDispatch(notification, isDryRun);
+            CompletableFuture<Response> localcompletableFuture = new CompletableFuture<Response>();
+            Function<Object, Boolean> fn =
+                new Function<Object, Boolean>() {
+
+                  @Override
+                  public Boolean apply(Object object) {
+                    Response response = new Response();
+                    if (object instanceof Boolean) {
+                      responseMap.put(notification.getIds().get(0), (Boolean) object);
+                      response.putAll(responseMap);
+                      localcompletableFuture.complete(response);
+                      return (Boolean) object;
+                    } else {
+                      responseMap.put(notification.getIds().get(0), false);
+                      response.putAll(responseMap);
+                      localcompletableFuture.complete(response);
+                      return false;
+                    }
+                  }
+                };
+            syDispatcher.syncDispatch(notification, isDryRun).thenApplyAsync(fn);
+            completableFuture = localcompletableFuture;
+
           } else {
             response = writeDataToKafa(notification, response, isDryRun, responseMap, isSync);
+            completableFuture.complete(response);
           }
         }
       }
@@ -114,15 +136,16 @@ public class NotificationRouter {
       logger.info(
           "requested notification list is either null or empty :" + notificationRequestList);
     }
-    return response;
+    return completableFuture;
   }
 
-  private Response handleMessageAndOTP(
+  private CompletableFuture<Response> handleMessageAndOTP(
       NotificationRequest notification,
       boolean isDryRun,
       Map<String, Object> responseMap,
       boolean isSync)
       throws BaseException {
+    CompletableFuture<Response> completableFuture = new CompletableFuture<Response>();
     Response response = new Response();
     String message = null;
     if (notification.getTemplate() != null
@@ -130,6 +153,26 @@ public class NotificationRouter {
       message =
           getMessage(notification.getTemplate().getData(), notification.getTemplate().getParams());
     }
+
+    Function<Object, Boolean> fn =
+        new Function<Object, Boolean>() {
+
+          @Override
+          public Boolean apply(Object object) {
+            Response response = new Response();
+            if (object instanceof Boolean) {
+              responseMap.put(notification.getIds().get(0), (Boolean) object);
+              response.putAll(responseMap);
+              completableFuture.complete(response);
+              return (Boolean) object;
+            } else {
+              responseMap.put(notification.getIds().get(0), false);
+              response.putAll(responseMap);
+              completableFuture.complete(response);
+              return false;
+            }
+          }
+        };
 
     Config config = notification.getConfig();
     if (config != null && config.getOtp() != null
@@ -145,21 +188,19 @@ public class NotificationRouter {
       }
       OTPRequest request =
           new OTPRequest(ids.get(0), null, otp.getLength(), otp.getExpiryInMinute(), message, null);
-      boolean smsResponse = getSMSInstance().sendOtp(request);
-      responseMap.put(ids.get(0), smsResponse);
-      response.putAll(responseMap);
+      getSMSInstance().sendOtp(request).thenApplyAsync(fn);
     } else {
       if (notification.getTemplate() != null) {
         notification.getTemplate().setData(message);
       }
       if (isSync) {
-        response = syDispatcher.syncDispatch(notification, isDryRun);
+        syDispatcher.syncDispatch(notification, isDryRun).thenApplyAsync(fn);
 
       } else {
         response = writeDataToKafa(notification, response, isDryRun, responseMap, isSync);
       }
     }
-    return response;
+    return completableFuture;
   }
 
   private String createNotificationBody(NotificationRequest notification) throws BaseException {

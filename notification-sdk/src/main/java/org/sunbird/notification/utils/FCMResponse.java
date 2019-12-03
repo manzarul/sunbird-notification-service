@@ -9,7 +9,7 @@ public class FCMResponse {
   int success;
   int failure;
   long multicast_id;
-  int message_id;
+  long message_id;
   String error;
   List<Result> results;
 
@@ -53,7 +53,7 @@ public class FCMResponse {
     this.results = results;
   }
 
-  public int getMessage_id() {
+  public long getMessage_id() {
     return message_id;
   }
 

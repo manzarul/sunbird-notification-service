@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mashape.unirest.http.HttpResponse;
 import com.mashape.unirest.http.Unirest;
+import com.mashape.unirest.http.async.Callback;
 import com.mashape.unirest.http.exceptions.UnirestException;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -14,6 +15,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.StatusLine;
@@ -233,53 +236,23 @@ public class Msg91SmsProviderImpl implements ISmsProvider {
   }
 
   @Override
-  public boolean bulkSms(List<String> phoneNumber, String smsText) {
+  public CompletableFuture<Boolean> bulkSms(List<String> phoneNumber, String smsText) {
+    CompletableFuture<Boolean> future = new CompletableFuture<Boolean>();
     List<String> phoneNumberList = null;
-    logger.debug("Msg91SmsProvider@Sending " + smsText + "  to mobileNumber ");
-    logger.debug(
-        "Msg91SmsProvider@SMS Provider parameters \n"
-            + "Gateway - "
-            + baseUrl
-            + "\n"
-            + "authKey - "
-            + authKey
-            + "\n"
-            + "sender - "
-            + sender
-            + "\n"
-            + "country - "
-            + country
-            + "\n"
-            + "smsRoute - "
-            + smsRoute
-            + "\n");
-
     if (JsonUtil.isStringNullOREmpty(smsText)) {
       logger.debug("can't sent empty msg.");
-      return false;
+      future.complete(false);
+      return future;
     }
     phoneNumberList = validatePhoneList(phoneNumber);
     if (phoneNumberList == null || phoneNumberList.isEmpty()) {
       logger.debug("can't sent msg with empty phone list.");
-      return false;
+      future.complete(false);
+      return future;
     }
-    CloseableHttpClient httpClient = null;
     try {
-      httpClient = HttpClients.createDefault();
-
-      String path = null;
-      logger.debug("Inside POST");
-
-      path = baseUrl + postUrl;
+      String path = baseUrl + postUrl;
       logger.debug("Msg91SmsProvider -Executing request - " + path);
-
-      HttpPost httpPost = new HttpPost(path);
-
-      // add content-type headers
-      httpPost.setHeader("content-type", "application/json");
-
-      // add authkey header
-      httpPost.setHeader("authkey", authKey);
       // create sms
       Sms sms = new Sms(URLEncoder.encode(smsText, "UTF-8"), phoneNumberList);
 
@@ -290,39 +263,47 @@ public class Msg91SmsProviderImpl implements ISmsProvider {
       ProviderDetails providerDetails = new ProviderDetails(sender, smsRoute, country, smsList);
 
       String providerDetailsString = JsonUtil.toJson(providerDetails);
+      Unirest.post(path)
+          .headers(headers)
+          .body(providerDetailsString)
+          .asStringAsync(
+              new Callback<String>() {
+                @Override
+                public void failed(UnirestException e) {
+                  future.complete(false);
+                }
 
-      if (!JsonUtil.isStringNullOREmpty(providerDetailsString)) {
-        logger.debug("Msg91SmsProvider - Body - " + providerDetailsString);
+                @Override
+                public void completed(HttpResponse<String> response) {
+                  if (response.getStatus() == NotificationConstant.SUCCESS_CODE) {
+                    MessageResponse messageResponse = convertMsg91Response(response.getBody());
+                    if (NotificationConstant.SUCCESS.equalsIgnoreCase(messageResponse.getType())) {
+                      logger.info("SMS sent succssfully with response data " + response.getBody());
+                      future.complete(true);
+                    }
+                    logger.info("SMS sent response data " + response.getBody());
+                  } else {
+                    logger.info(
+                        "SMS failed to sent with status code and response data "
+                            + response.getStatus()
+                            + " "
+                            + response.getBody());
+                    future.complete(false);
+                  }
+                }
 
-        HttpEntity entity = new ByteArrayEntity(providerDetailsString.getBytes("UTF-8"));
-        httpPost.setEntity(entity);
+                @Override
+                public void cancelled() {
 
-        CloseableHttpResponse response = httpClient.execute(httpPost);
-        StatusLine sl = response.getStatusLine();
-        response.close();
-        if (sl.getStatusCode() != 200) {
-          logger.error(
-              "SMS code for "
-                  + phoneNumberList
-                  + " could not be sent: "
-                  + sl.getStatusCode()
-                  + " - "
-                  + sl.getReasonPhrase());
-        }
-        return sl.getStatusCode() == 200;
-      } else {
-        return false;
-      }
-
-    } catch (IOException e) {
-      logger.error(e);
-      return false;
+                  logger.info("send otp call is cancelled.");
+                  future.complete(false);
+                }
+              });
     } catch (Exception e) {
-      logger.error("Msg91SmsProvider : send : error in converting providerDetails to String");
-      return false;
-    } finally {
-      closeHttpResource(httpClient);
+      logger.error("Error occured during sms sending " + e.getMessage());
+      future.complete(false);
     }
+    return future;
   }
 
   /**
@@ -346,39 +327,53 @@ public class Msg91SmsProviderImpl implements ISmsProvider {
   }
 
   @Override
-  public boolean sendOtp(OTPRequest request) {
+  public CompletableFuture<Boolean> sendOtp(OTPRequest request) {
+    CompletableFuture<Boolean> future = new CompletableFuture<Boolean>();
     if (!isOtpRequestValid(request)) {
       logger.info("Send opt request is not valid.");
-      return false;
+      future.complete(false);
+      return future;
     }
-    boolean otpResponse = false;
-    try {
-      String data = createOtpReqData(request);
-      HttpResponse<String> response =
-          Unirest.get(OTP_BASE_URL + "sendotp.php?authkey=" + authKey + data).asString();
-      if (response != null) {
-        if (response.getStatus() == NotificationConstant.SUCCESS_CODE) {
-          MessageResponse messageResponse = convertMsg91Response(response.getBody());
-          if (NotificationConstant.SUCCESS.equalsIgnoreCase(messageResponse.getType())) {
-            logger.info("OTP sent succssfully with response data " + response.getBody());
-            otpResponse = true;
-          }
-          logger.info("OTP sent response data " + response.getBody());
-        } else {
-          logger.info(
-              "OTP failed to sent with status code and response data "
-                  + response.getStatus()
-                  + " "
-                  + response.getBody());
-        }
-      }
+    String data = createOtpReqData(request);
+    Future<HttpResponse<String>> response =
+        Unirest.get(OTP_BASE_URL + "sendotp.php?authkey=" + authKey + data)
+            .asStringAsync(
+                new Callback<String>() {
+                  @Override
+                  public void failed(UnirestException e) {
+                    future.complete(false);
+                  }
 
-    } catch (UnirestException e) {
-      logger.error(
-          "Msg91SmsProviderImpl:sendOtp  exception occured during otp send :" + e.getMessage());
-      e.printStackTrace();
-    }
-    return otpResponse;
+                  @Override
+                  public void completed(HttpResponse<String> response) {
+                    if (response.getStatus() == NotificationConstant.SUCCESS_CODE) {
+                      MessageResponse messageResponse = convertMsg91Response(response.getBody());
+                      if (NotificationConstant.SUCCESS.equalsIgnoreCase(
+                          messageResponse.getType())) {
+                        logger.info(
+                            "OTP sent succssfully with response data " + response.getBody());
+                        future.complete(true);
+                      }
+                      logger.info("OTP sent response data " + response.getBody());
+                    } else {
+                      logger.info(
+                          "OTP failed to sent with status code and response data "
+                              + response.getStatus()
+                              + " "
+                              + response.getBody());
+                      future.complete(false);
+                    }
+                  }
+
+                  @Override
+                  public void cancelled() {
+
+                    logger.info("send otp call is cancelled.");
+                    future.complete(false);
+                  }
+                });
+
+    return future;
   }
 
   @Override

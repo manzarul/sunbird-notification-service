@@ -1,6 +1,7 @@
 package org.sunbird.notification.sms.provider;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import org.sunbird.notification.beans.OTPRequest;
 
 /**
@@ -39,7 +40,7 @@ public interface ISmsProvider {
    * @param smsText Sms text
    * @return boolean
    */
-  boolean bulkSms(List<String> phoneNumber, String smsText);
+  CompletableFuture<Boolean> bulkSms(List<String> phoneNumber, String smsText);
   /**
    * This method will send OTP to user phone number.
    *
@@ -48,7 +49,7 @@ public interface ISmsProvider {
    *     India
    * @return boolean
    */
-  boolean sendOtp(OTPRequest otpRequest);
+  CompletableFuture<Boolean> sendOtp(OTPRequest otpRequest);
   /**
    * This method is used for resending otp on phone number only.
    *

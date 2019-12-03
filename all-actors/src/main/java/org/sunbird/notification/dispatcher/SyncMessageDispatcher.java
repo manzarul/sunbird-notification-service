@@ -1,6 +1,7 @@
 /** */
 package org.sunbird.notification.dispatcher;
 
+import java.util.concurrent.CompletableFuture;
 import org.sunbird.notification.beans.EmailConfig;
 import org.sunbird.notification.beans.EmailRequest;
 import org.sunbird.notification.beans.SMSConfig;
@@ -20,16 +21,21 @@ public class SyncMessageDispatcher {
   private IEmailService emailservice;
   private ISmsProvider smsProvider;
 
-  public Response syncDispatch(NotificationRequest notification, boolean isDryRun) {
+  public CompletableFuture<Boolean> syncDispatch(
+      NotificationRequest notification, boolean isDryRun) {
     if (notification.getMode().equalsIgnoreCase(DeliveryMode.phone.name())
         && notification.getDeliveryType().equalsIgnoreCase(DeliveryType.message.name())) {
       return syncMessageDispatch(notification, isDryRun);
     }
 
-    return syncEmailDispatch(notification, isDryRun);
+    syncEmailDispatch(notification, isDryRun);
+    CompletableFuture<Boolean> future = new CompletableFuture<Boolean>();
+    future.complete(true);
+    return future;
   }
 
   private Response syncEmailDispatch(NotificationRequest notificationRequest, boolean isDryRun) {
+    CompletableFuture<Boolean> future = new CompletableFuture<Boolean>();
     EmailRequest request =
         new EmailRequest(
             notificationRequest.getConfig().getSubject(),
@@ -39,19 +45,17 @@ public class SyncMessageDispatcher {
             null,
             notificationRequest.getTemplate().getData(),
             null);
-    boolean emailResponse = getEmailInstance().sendEmail(request);
+    boolean emailResponse = true;
+    future.thenRunAsync(() -> getEmailInstance().sendEmail(request));
     Response response = new Response();
     response.put(Constant.RESPONSE, emailResponse);
     return response;
   }
 
-  private Response syncMessageDispatch(NotificationRequest notificationRequest, boolean isDryRun) {
-    Response response = new Response();
-    boolean smsResponse =
-        getSmsInstance()
-            .bulkSms(notificationRequest.getIds(), notificationRequest.getTemplate().getData());
-    response.put(Constant.RESPONSE, smsResponse);
-    return response;
+  private CompletableFuture<Boolean> syncMessageDispatch(
+      NotificationRequest notificationRequest, boolean isDryRun) {
+    return getSmsInstance()
+        .bulkSms(notificationRequest.getIds(), notificationRequest.getTemplate().getData());
   }
 
   private ISmsProvider getSmsInstance() {

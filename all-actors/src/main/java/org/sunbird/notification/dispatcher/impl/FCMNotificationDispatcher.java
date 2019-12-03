@@ -66,7 +66,7 @@ public class FCMNotificationDispatcher implements INotificationDispatcher {
       Map<String, String> map = new HashMap<String, String>();
       map.put(RAW_DATA, notificationData);
       if (config != null && StringUtils.isNotBlank(config.getTopic())) {
-        response = service.sendTopicNotification(config.getTopic(), map, isDryRun);
+        response = service.sendTopicNotificationAsync(config.getTopic(), map, isDryRun);
       } else {
         if (notification.getIds().size() <= BATCH_SIZE) {
           response = service.sendMultiDeviceNotification(notification.getIds(), map, isDryRun);

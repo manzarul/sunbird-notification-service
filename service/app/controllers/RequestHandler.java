@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import org.apache.commons.lang3.StringUtils;
 import org.sunbird.BaseException;
 import org.sunbird.message.IResponseMessage;
@@ -15,7 +16,7 @@ import play.libs.Json;
 import play.libs.concurrent.HttpExecutionContext;
 import play.mvc.Result;
 import play.mvc.Results;
-import scala.concurrent.Await;
+import scala.compat.java8.FutureConverters;
 import scala.concurrent.Future;
 import utils.JsonKey;
 
@@ -44,14 +45,18 @@ public class RequestHandler extends BaseController {
     Object obj;
     CompletableFuture<String> cf = new CompletableFuture<>();
     request.setOperation(operation);
-    // ProjectLogger.log(String.format("%s:%s:Requested operation
-    // %s",this.getClass().getSimpleName(),"handleRequest",operation), LoggerEnum.DEBUG.name());
-    // startTrace("handleRequest");
+    Function<Object, Result> fn =
+        new Function<Object, Result>() {
+
+          @Override
+          public Result apply(Object object) {
+            return handleResponse(object, httpExecutionContext, req);
+          }
+        };
+
     Timeout t = new Timeout(Long.valueOf(request.getTimeout()), TimeUnit.SECONDS);
     Future<Object> future = Patterns.ask(getActorRef(operation), request, t);
-    obj = Await.result(future, t.duration());
-    // endTrace("handleRequest");
-    return handleResponse(obj, httpExecutionContext, req);
+    return FutureConverters.toJava(future).thenApplyAsync(fn);
   }
 
   /**
@@ -60,7 +65,7 @@ public class RequestHandler extends BaseController {
    * @param exception
    * @return
    */
-  public static CompletionStage<Result> handleFailureResponse(
+  public static Result handleFailureResponse(
       Object exception, HttpExecutionContext httpExecutionContext, play.mvc.Http.Request req) {
 
     Response response = new Response();
@@ -75,16 +80,16 @@ public class RequestHandler extends BaseController {
       response.setTs(System.currentTimeMillis() + "");
       future.complete(Json.toJson(response));
       if (ex.getResponseCode() == Results.badRequest().status()) {
-        return future.thenApplyAsync(Results::badRequest, httpExecutionContext.current());
+        return Results.badRequest(Json.toJson(response));
       } else {
-        return future.thenApplyAsync(Results::internalServerError, httpExecutionContext.current());
+        return Results.internalServerError();
       }
     } else {
       response.setResponseCode(IResponseMessage.SERVER_ERROR);
       response.put(
           JsonKey.MESSAGE, localizerObject.getMessage(IResponseMessage.INTERNAL_ERROR, null));
       future.complete(Json.toJson(response));
-      return future.thenApplyAsync(Results::internalServerError, httpExecutionContext.current());
+      return Results.internalServerError(Json.toJson(response));
     }
   }
 
@@ -95,7 +100,7 @@ public class RequestHandler extends BaseController {
    * @param httpExecutionContext
    * @return
    */
-  public static CompletionStage<Result> handleResponse(
+  public static Result handleResponse(
       Object object, HttpExecutionContext httpExecutionContext, play.mvc.Http.Request req) {
 
     if (object instanceof Response) {
@@ -112,7 +117,7 @@ public class RequestHandler extends BaseController {
    * @param response
    * @return
    */
-  public static CompletionStage<Result> handleSuccessResponse(
+  public static Result handleSuccessResponse(
       Response response, HttpExecutionContext httpExecutionContext, play.mvc.Http.Request req) {
     CompletableFuture<JsonNode> future = new CompletableFuture<>();
     String apiId = getApiId(req.path());
@@ -120,7 +125,7 @@ public class RequestHandler extends BaseController {
     response.setVer("v1");
     response.setTs(System.currentTimeMillis() + "");
     future.complete(Json.toJson(response));
-    return future.thenApplyAsync(Results::ok, httpExecutionContext.current());
+    return Results.ok(Json.toJson(response));
   }
 
   public static String getApiId(String uri) {

@@ -35,6 +35,18 @@ public interface IFCMNotificationService {
       List<String> deviceIds, Map<String, String> data, boolean isDryRun);
 
   /**
+   * This api will be used for sending notification to multiple device. max 100 device notification
+   * is supported here as Async.
+   *
+   * @param deviceIds list of device ids
+   * @param isDryRun required true for dry run case
+   * @param data notification data
+   * @return FCMResponse
+   */
+  public FCMResponse sendMultiDeviceNotificationAsync(
+      List<String> deviceIds, Map<String, String> data, boolean isDryRun);
+
+  /**
    * Method used for sending topic based notification
    *
    * @param topic name if topic
@@ -43,5 +55,16 @@ public interface IFCMNotificationService {
    * @return FCMResponse
    */
   public FCMResponse sendTopicNotification(
+      String topic, Map<String, String> data, boolean isDryRun);
+
+  /**
+   * Method used for sending topic based notification
+   *
+   * @param topic name if topic
+   * @param data notification data
+   * @param isDryRun required true for dry run case
+   * @return FCMResponse
+   */
+  public FCMResponse sendTopicNotificationAsync(
       String topic, Map<String, String> data, boolean isDryRun);
 }

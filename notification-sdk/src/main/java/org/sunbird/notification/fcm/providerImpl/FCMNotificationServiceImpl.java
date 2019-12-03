@@ -73,4 +73,18 @@ public class FCMNotificationServiceImpl implements IFCMNotificationService {
     }
     return null;
   }
+
+  @Override
+  public FCMResponse sendMultiDeviceNotificationAsync(
+      List<String> deviceIds, Map<String, String> data, boolean isDryRun) {
+    // TODO Auto-generated method stub
+    return null;
+  }
+
+  @Override
+  public FCMResponse sendTopicNotificationAsync(
+      String topic, Map<String, String> data, boolean isDryRun) {
+    // TODO Auto-generated method stub
+    return null;
+  }
 }

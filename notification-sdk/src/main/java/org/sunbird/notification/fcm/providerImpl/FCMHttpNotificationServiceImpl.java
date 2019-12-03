@@ -5,10 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mashape.unirest.http.HttpResponse;
 import com.mashape.unirest.http.JsonNode;
 import com.mashape.unirest.http.Unirest;
+import com.mashape.unirest.http.async.Callback;
+import com.mashape.unirest.http.exceptions.UnirestException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Future;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -86,11 +89,32 @@ public class FCMHttpNotificationServiceImpl implements IFCMNotificationService {
       object.put(NotificationConstant.DATA, object1);
       object.put(NotificationConstant.DRY_RUN, isDryRun);
       object.put(NotificationConstant.TO, TOPIC_SUFFIX + topic);
-      HttpResponse<JsonNode> httpResponse =
-          Unirest.post(FCM_URL).headers(headerMap).body(object.toString()).asJson();
-      String responsebody = httpResponse.getBody().toString();
+      Future<HttpResponse<JsonNode>> httpResponse =
+          Unirest.post(FCM_URL)
+              .headers(headerMap)
+              .body(object.toString())
+              .asJsonAsync(
+                  new Callback<JsonNode>() {
+                    @Override
+                    public void completed(HttpResponse<JsonNode> httpResponse) {
+                      logger.info("on complete method called");
+                    }
+
+                    @Override
+                    public void failed(UnirestException e) {
+                      logger.info("on failed method called");
+                      e.printStackTrace();
+                    }
+
+                    @Override
+                    public void cancelled() {
+                      logger.info("on cancelled method called");
+                    }
+                  });
+      ;
+      response = mapper.readValue(httpResponse.get().getBody().toString(), FCMResponse.class);
       logger.info("FCM Notification response== for topic " + topic + response);
-      response = mapper.readValue(responsebody, FCMResponse.class);
+      // response = mapper.readValue(responsebody, FCMResponse.class);
     } catch (Exception e) {
       logger.info(e.getMessage());
     }
@@ -118,14 +142,81 @@ public class FCMHttpNotificationServiceImpl implements IFCMNotificationService {
       object.put(NotificationConstant.DATA, object1);
       object.put(NotificationConstant.DRY_RUN, isDryRun);
       object.put(NotificationConstant.REGISTRATION_IDS, deviceIds);
-      HttpResponse<JsonNode> httpResponse =
-          Unirest.post(FCM_URL).headers(headerMap).body(object).asJson();
-      String response = httpResponse.getBody().toString();
-      logger.info("FCM Notification response== for device ids " + deviceIds + " " + response);
-      fcmResponse = mapper.readValue(response, FCMResponse.class);
+      Future<HttpResponse<JsonNode>> httpResponse =
+          Unirest.post(FCM_URL)
+              .headers(headerMap)
+              .body(object)
+              .asJsonAsync(
+                  new Callback<JsonNode>() {
+                    @Override
+                    public void completed(HttpResponse<JsonNode> httpResponse) {
+                      logger.info(
+                          "FCM Notification response== for device ids "
+                              + deviceIds
+                              + " "
+                              + httpResponse);
+                    }
+
+                    @Override
+                    public void failed(UnirestException e) {
+                      e.printStackTrace();
+                    }
+
+                    @Override
+                    public void cancelled() {}
+                  });
+      fcmResponse = mapper.readValue(httpResponse.get().getBody().toString(), FCMResponse.class);
     } catch (Exception e) {
       logger.info(e.getMessage());
     }
     return fcmResponse;
+  }
+
+  @Override
+  public FCMResponse sendMultiDeviceNotificationAsync(
+      List<String> deviceIds, Map<String, String> data, boolean isDryRun) {
+    return null;
+  }
+
+  @Override
+  public FCMResponse sendTopicNotificationAsync(
+      String topic, Map<String, String> data, boolean isDryRun) {
+    if (StringUtils.isBlank(FCM_ACCOUNT_KEY) || StringUtils.isBlank(FCM_URL)) {
+      logger.info("FCM account key or URL is not provided===" + FCM_URL);
+      return null;
+    }
+    FCMResponse response = null;
+    try {
+      JSONObject object1 = new JSONObject(data.get(NotificationConstant.RAW_DATA));
+      JSONObject object = new JSONObject();
+      object.put(NotificationConstant.DATA, object1);
+      object.put(NotificationConstant.DRY_RUN, isDryRun);
+      object.put(NotificationConstant.TO, TOPIC_SUFFIX + topic);
+      Unirest.post(FCM_URL)
+          .headers(headerMap)
+          .body(object.toString())
+          .asJsonAsync(
+              new Callback<JsonNode>() {
+                @Override
+                public void completed(HttpResponse<JsonNode> httpResponse) {
+                  logger.info("on complete method called" + httpResponse.getBody().toString());
+                }
+
+                @Override
+                public void failed(UnirestException e) {
+                  logger.info("on failed method called" + e);
+                }
+
+                @Override
+                public void cancelled() {
+                  logger.info("on cancelled method called");
+                }
+              });
+      response = new FCMResponse();
+      logger.info("FCM Notification response== for topic " + topic + response);
+    } catch (Exception e) {
+      logger.info(e.getMessage());
+    }
+    return response;
   }
 }
